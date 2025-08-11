@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hevy Dashboard — Analyse locale (CSV)</title>
+  <meta name="description" content="Dashboard musculation local pour fichiers CSV Hevy — aucun upload, tout reste sur votre appareil." />
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#effdf6', 100: '#d9f7e8', 200: '#b4eed3', 300: '#83e0bb',
+              400: '#4fd2a4', 500: '#21c38f', 600: '#17a677', 700: '#148563',
+              800: '#126a52', 900: '#0f5745'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    html,body{font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial}
+    .card{ background: radial-gradient(1000px 600px at 0% 0%, #0f172a 0%, #0b1220 50%); border:1px solid #11182780 }
+    .glass{ background: linear-gradient(180deg, #0b1220cc, #0b122088); backdrop-filter: blur(6px); border:1px solid #11182780 }
+    .chip{ border:1px solid #2b364f; background:#0e1626; }
+    .grid-auto{ grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  </style>
+  <!-- Plotly & PapaParse & Day.js -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/utc.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/customParseFormat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/isoWeek.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/weekOfYear.js"></script>
+  <script>
+    dayjs.extend(dayjs_plugin_utc); dayjs.extend(dayjs_plugin_customParseFormat);
+    dayjs.extend(dayjs_plugin_isoWeek); dayjs.extend(dayjs_plugin_weekOfYear);
+  </script>
+</head>
+<body class="bg-slate-950 text-slate-100">
+  <!-- Header -->
+  <header class="sticky top-0 z-50 border-b border-slate-800/70 bg-slate-950/80 backdrop-blur">
+    <div class="mx-auto max-w-7xl px-4 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="h-8 w-8 rounded-xl bg-brand-500/20 ring-2 ring-brand-500/60 flex items-center justify-center">
+          <svg class="h-5 w-5 text-brand-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H7a4 4 0 0 1-4-4V7a2 2 0 0 1 2-2h4"/><path d="M18 2v4"/><path d="M2 12h12"/><path d="M7 19h10a2 2 0 0 0 2-2V7"/></svg>
+        </div>
+        <div>
+          <h1 class="text-lg font-semibold">Hevy Dashboard — Local CSV</h1>
+          <p class="text-xs text-slate-400">100% local · aucune donnée envoyée — code public, données privées</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="relative inline-flex items-center cursor-pointer select-none">
+          <input type="checkbox" id="useRPE" class="sr-only peer">
+          <div class="w-11 h-6 bg-slate-700 peer-checked:bg-brand-600 rounded-full after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5"></div>
+          <span class="ml-2 text-xs text-slate-300">Pondérer sets par RPE</span>
+        </label>
+        <button id="btnReset" class="px-3 py-2 text-xs rounded-lg chip hover:ring-1 hover:ring-brand-500">Réinitialiser</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Uploader & Filters -->
+  <section class="mx-auto max-w-7xl px-4 pt-6 pb-4">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="card rounded-2xl p-4">
+        <h2 class="font-semibold mb-2">Importer ton fichier Hevy (.csv)</h2>
+        <p class="text-sm text-slate-400 mb-3">Fichier exporté depuis Hevy (Profil → Paramètres → Export). Le fichier est lu <b>localement</b> dans ton navigateur.</p>
+        <input id="fileInput" type="file" accept=".csv" class="w-full rounded-lg bg-slate-900 border border-slate-700 p-2" />
+        <p id="fileInfo" class="text-xs text-slate-400 mt-2"></p>
+        <div id="parseAlert" class="hidden mt-3 text-xs text-amber-300"></div>
+      </div>
+      <div class="card rounded-2xl p-4">
+        <h2 class="font-semibold mb-2">Période</h2>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs mb-1 text-slate-400">Date début</label>
+            <input id="startDate" type="date" class="w-full rounded-lg bg-slate-900 border border-slate-700 p-2" />
+          </div>
+          <div>
+            <label class="block text-xs mb-1 text-slate-400">Date fin</label>
+            <input id="endDate" type="date" class="w-full rounded-lg bg-slate-900 border border-slate-700 p-2" />
+          </div>
+        </div>
+        <div class="mt-3 flex flex-wrap gap-2 text-xs">
+          <button data-range="28" class="rangeBtn px-3 py-1 rounded chip">28 j</button>
+          <button data-range="84" class="rangeBtn px-3 py-1 rounded chip">12 sem</button>
+          <button data-range="182" class="rangeBtn px-3 py-1 rounded chip">6 mois</button>
+          <button data-range="365" class="rangeBtn px-3 py-1 rounded chip">12 mois</button>
+        </div>
+      </div>
+      <div class="card rounded-2xl p-4">
+        <h2 class="font-semibold mb-1">Progression par exercice</h2>
+        <p class="text-xs text-slate-400 mb-2">Sélectionne d'abord un <b>groupe musculaire</b>, puis clique sur <b>un exercice</b> : le graphique s’actualise.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+          <div>
+            <label class="block text-xs mb-1 text-slate-400">Groupe musculaire</label>
+            <select id="groupSelect" class="w-full rounded-lg bg-slate-900 border border-slate-700 p-2"></select>
+          </div>
+          <div>
+            <label class="block text-xs mb-1 text-slate-400">Seuil de reps (≥)</label>
+            <input id="repThreshold" type="number" min="1" max="20" value="5" class="w-full rounded-lg bg-slate-900 border border-slate-700 p-2" />
+          </div>
+          <div class="md:col-span-2">
+            <label class="block text-xs mb-1 text-slate-400">Métrique</label>
+            <select id="metricSelect" class="w-full rounded-lg bg-slate-900 border border-slate-700 p-2">
+              <option value="best_weight">Meilleure charge (≥ seuil)</option>
+              <option value="best_volume">Meilleure série volume (kg×reps)</option>
+            </select>
+          </div>
+        </div>
+        <div id="exerciseList" class="flex flex-wrap gap-2 max-h-48 overflow-auto"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- KPI Cards -->
+  <section class="mx-auto max-w-7xl px-4 pb-2">
+    <div class="grid grid-auto gap-4">
+      <div class="glass rounded-2xl p-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-xs text-slate-400">Sets pecs (semaine dernière)</p>
+            <p id="kpiPecsSets" class="text-2xl font-semibold">—</p>
+          </div>
+          <div class="text-right">
+            <p class="text-xs text-slate-400">Record récent (30 j) — exercice sélectionné</p>
+            <p id="kpiMainPR" class="text-2xl font-semibold">—</p>
+          </div>
+        </div>
+        <div id="kpiAlerts" class="mt-3 text-xs text-amber-300"></div>
+      </div>
+      <div class="glass rounded-2xl p-4">
+        <p class="text-xs text-slate-400">Résumé</p>
+        <div id="summaryText" class="text-sm"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Charts -->
+  <section class="mx-auto max-w-7xl px-4 pb-12">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="card rounded-2xl p-4 lg:col-span-2">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-semibold">Progression — exercice sélectionné</h3>
+          <button class="text-xs chip px-2 py-1" onclick="downloadPlot('chart_progress')">PNG</button>
+        </div>
+        <div id="chart_progress" class="h-80"></div>
+      </div>
+      <div class="card rounded-2xl p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-semibold">Sets effectifs par semaine (groupes)</h3>
+          <button class="text-xs chip px-2 py-1" onclick="downloadPlot('chart_sets')">PNG</button>
+        </div>
+        <div id="chart_sets" class="h-72"></div>
+      </div>
+      <div class="card rounded-2xl p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-semibold">Séances par semaine</h3>
+          <button class="text-xs chip px-2 py-1" onclick="downloadPlot('chart_sessions')">PNG</button>
+        </div>
+        <div id="chart_sessions" class="h-72"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="border-t border-slate-800/70 py-6">
+    <div class="mx-auto max-w-7xl px-4 text-xs text-slate-500">
+      <p>Fonctionne 100% en local. Aucune donnée envoyée. — Conçu pour Hevy CSV (FR/EN).</p>
+    </div>
+  </footer>
+
+  <script>
+    // ======== STATE ========
+    const state = {
+      rows: [], // lignes parsees normalisées
+      cols: {}, // mapping colonnes
+      groups: {},
+      exercises: new Set(),
+      exerciseGroupMap: new Map(),
+      selectedExercise: null,
+      selectedGroup: 'Tous',
+      period: { start: null, end: null },
+      useRPE: false,
+      repThreshold: 5,
+      metric: 'best_weight', // or 'best_volume'
+    }
+
+    const GROUP_ORDER = ['Pectoraux','Deltoïdes arrière','Dos','Biceps','Triceps','Jambes (quads)','Jambes (ischios/glutes)','Mollets','Tronc (core)','Épaules (ant/lat)','Autre/Indéfini']
+
+    // ======== COLUMN DETECTION ========
+    function detectColumns(headers){
+      const low = headers.map(h=>String(h||'').trim().toLowerCase())
+      const find = (cands)=>{ for(const c of cands){ const idx=low.indexOf(c); if(idx!==-1) return headers[idx] } return null }
+      return {
+        date: find(['date','workout_date','start_time','workout_start_time']),
+        exercise: find(['exercise','exercise_name','movement','exercise_title']),
+        reps: find(['reps','rep','repetitions']),
+        weight: find(['weight','weight_kg','kg','load','weight (kg)','weight_(kg)']),
+        setType: find(['set_type','type','is_warmup']),
+        rpe: find(['rpe','rir','effort']),
+        duration: find(['duration_seconds','duration','seconds']),
+        title: find(['workout_name','title','session'])
+      }
+    }
+
+    // ======== PARSE & NORMALIZE ========
+    function parseDateSmart(v){
+      if(!v) return null
+      const tryFormats = ['YYYY-MM-DD','YYYY/MM/DD','DD/MM/YYYY','MM/DD/YYYY','YYYY-MM-DD HH:mm:ss','DD/MM/YYYY HH:mm','YYYY/MM/DD HH:mm']
+      for(const f of tryFormats){ const d=dayjs(v,f,true); if(d.isValid()) return d }
+      const d2=dayjs(new Date(v)); return d2.isValid()? d2 : null
+    }
+
+    function categorizeExercise(name){
+      const n = String(name||'').toLowerCase();
+      const has = (arr)=>arr.some(k=>n.includes(k))
+
+      // Épaules (inclut maintenant l'arrière d'épaule)
+      if( has(['shoulder','overhead','military','lateral raise','élévation lat','elevation laterale','élévation latérale','front raise','élévation frontale','elevation frontale','rear delt','reverse fly','reverse pec','face pull','y-raise','band pull-apart','oiseau']) ) return 'Épaules (ant/lat)'
+
+      // Pectoraux (ajout push-ups/pompes)
+      if( (has(['bench','développé','developpe','press','pec','fly','crossover','chest','peck','push up','push-up','pushup','push ups','press-up','pompe','pompes'])) && !has(['shoulder','overhead','military']) ) {
+        return 'Pectoraux'
+      }
+
+      // Dos
+      if( has(['row','tirage','pull-up','traction','pulldown','lat pull','pendlay','seal row']) ) return 'Dos'
+
+      // Jambes (quads)
+      if( has(['squat','hack','leg press','presse a cuisse','presse à cuisse','fente','lunge','extension jambe','leg extension']) ) return 'Jambes (quads)'
+
+      // Jambes (ischios/glutes)
+      if( has(['rdl','soulevé','souleve','deadlift','leg curl','hip thrust','glute','good morning','curl ischio']) ) return 'Jambes (ischios/glutes)'
+
+      // Biceps
+      if( has(['curl','biceps']) ) return 'Biceps'
+
+      // Triceps (ajout libellés courants et faute de frappe "extansion")
+      if( has(['triceps','pushdown','extension triceps','triceps extension','triceps extansion','skull','dip','overhead extension','french press']) ) return 'Triceps'
+
+      // Mollets
+      if( has(['calf','mollet']) ) return 'Mollets'
+
+      // Tronc
+      if( has(['plank','gainage','ab ',' ab','crunch','pallof','ab-wheel','roue','hollow']) ) return 'Tronc (core)'
+
+      return 'Autre/Indéfini'
+    }
+
+    function isWorkingSet(row){
+      const reps = Number(row.reps); const st = String(row.set_type||'').toLowerCase()
+      if(Number.isFinite(reps) && reps>=1){ if(st.includes('warm')) return false; return true }
+      return false
+    }
+
+    function effectiveSetValue(row, useRPE){
+      const reps = Number(row.reps); if(!(Number.isFinite(reps)&&reps>=1)) return 0
+      let base = (reps>=5 && reps<=30)? 1 : 0
+      if(!useRPE) return base
+      const rpe = Number(row.rpe); if(!Number.isFinite(rpe)) return base
+      const rir = Math.max(0, 10 - rpe); let w=1
+      if(rir>=4) w=0.5; else if(rir===3) w=0.75; else if(rir===2) w=1.0; else w=1.25
+      return base*w
+    }
+
+    function weekKey(d){ const year=d.isoWeekYear? d.isoWeekYear() : d.year(); const wk=d.isoWeek? d.isoWeek() : d.week(); return `${year}-W${String(wk).padStart(2,'0')}` }
+
+    function processRows(rows){
+      const out=[]
+      for(const r of rows){
+        const d = parseDateSmart(r[state.cols.date]); if(!d) continue
+        const exercise = r[state.cols.exercise]
+        const reps = Number(r[state.cols.reps])
+        const weight = Number(r[state.cols.weight])
+        const set_type = state.cols.setType ? r[state.cols.setType] : ''
+        const rpe = state.cols.rpe ? Number(r[state.cols.rpe]) : null
+        const duration = state.cols.duration ? Number(r[state.cols.duration]) : null
+        const group = categorizeExercise(exercise)
+        const tonnage = Number.isFinite(weight) && Number.isFinite(reps) ? weight*reps : 0
+        out.push({date:d, exercise, reps, weight, set_type, rpe, duration, group, tonnage})
+      }
+      state.rows = out
+      state.exercises = new Set(out.map(r=>r.exercise).filter(Boolean))
+      // Build exercise->group map (first occurrence wins)
+      state.exerciseGroupMap = new Map()
+      for(const r of out){ if(!state.exerciseGroupMap.has(r.exercise)) state.exerciseGroupMap.set(r.exercise, r.group) }
+      return out
+    }
+
+    function filterByPeriod(list){
+      const {start,end} = state.period; if(!start && !end) return list
+      return list.filter(r=>{ const t=r.date; if(start && t.isBefore(start,'day')) return false; if(end && t.isAfter(end,'day')) return false; return true })
+    }
+
+    function aggregate(){
+      const filtered = filterByPeriod(state.rows)
+      const weekMap = new Map() // wk -> group -> {sets, setsW}
+      const sessionsMap = new Map() // wk -> nb séances
+      const daySet = new Set()
+      for(const r of filtered){
+        if(!isWorkingSet(r)) continue
+        const wk = weekKey(r.date); const g=r.group
+        const es = effectiveSetValue(r, state.useRPE)
+        if(!weekMap.has(wk)) weekMap.set(wk, new Map())
+        const gm = weekMap.get(wk); if(!gm.has(g)) gm.set(g,{sets:0,setsW:0})
+        const agg = gm.get(g); agg.sets += (es>0?1:0); agg.setsW += es
+        const dayKey = r.date.format('YYYY-MM-DD'); if(!daySet.has(dayKey)){ daySet.add(dayKey); sessionsMap.set(wk,(sessionsMap.get(wk)||0)+1) }
+      }
+      const weeksSorted = Array.from(weekMap.keys()).sort()
+      const groups = {}
+      for(const wk of weeksSorted){ for(const [g,vals] of weekMap.get(wk).entries()){ if(!groups[g]) groups[g]=[]; groups[g].push({week:wk, sets:vals.sets, setsW:vals.setsW}) } }
+      state.groups = { weeksSorted, groups, sessions: sessionsMap }
+    }
+
+    // ======== GROUP FILTER UI ========
+    function populateGroupSelect(){
+      const sel = document.getElementById('groupSelect');
+      const set = new Set(Array.from(state.exerciseGroupMap.values()))
+      const groups = Array.from(set)
+      groups.sort((a,b)=>{
+        const ia = GROUP_ORDER.indexOf(a); const ib = GROUP_ORDER.indexOf(b)
+        if(ia!==-1 && ib!==-1) return ia-ib
+        if(ia!==-1) return -1
+        if(ib!==-1) return 1
+        return a.localeCompare(b)
+      })
+      sel.innerHTML = ''
+      const optAll = document.createElement('option'); optAll.value='Tous'; optAll.textContent='Tous les groupes'; sel.appendChild(optAll)
+      for(const g of groups){ const o=document.createElement('option'); o.value=g; o.textContent=g; sel.appendChild(o) }
+      // preserve selection if exists
+      if(!groups.includes(state.selectedGroup)) state.selectedGroup = 'Tous'
+      sel.value = state.selectedGroup
+      sel.onchange = ()=>{
+        state.selectedGroup = sel.value
+        // If current selected exercise not in this group, switch to first of the group
+        const names = filteredExerciseNames()
+        if(state.selectedGroup!=='Tous' && (!state.selectedExercise || !names.includes(state.selectedExercise))){
+          state.selectedExercise = names[0] || null
+        }
+        populateExercisePicker(); drawAll()
+      }
+    }
+
+    function filteredExerciseNames(){
+      const names = Array.from(state.exercises)
+      names.sort((a,b)=>a.localeCompare(b))
+      if(state.selectedGroup==='Tous') return names
+      return names.filter(n=> (state.exerciseGroupMap.get(n)||'Autre/Indéfini') === state.selectedGroup)
+    }
+
+    // ======== EXERCISE PICKER (single select) ========
+    function populateExercisePicker(){
+      const cont=document.getElementById('exerciseList'); cont.innerHTML=''
+      const names = filteredExerciseNames()
+      if(!names.length){
+        cont.innerHTML = '<div class="text-slate-500 text-xs">Aucun exercice dans ce groupe.</div>'
+        return
+      }
+      // Pré-sélection si rien
+      if(!state.selectedExercise || !names.includes(state.selectedExercise)){
+        // Bench/incliné si présent dans le sous-ensemble, sinon premier
+        const firstBench = names.find(n=>{ const s=n.toLowerCase(); const isBench=(s.includes('bench')||s.includes('développé couché')||(s.includes('press')&&!s.includes('shoulder')&&!s.includes('overhead')&&!s.includes('military'))) && !s.includes('incl') && !s.includes('decl'); const isIncline=(s.includes('incline')||s.includes('incliné')) && (s.includes('press')||s.includes('développé')); return isBench||isIncline })
+        state.selectedExercise = firstBench || names[0]
+      }
+      names.forEach(n=>{
+        const active = state.selectedExercise===n
+        const btn=document.createElement('button')
+        btn.className=`text-xs px-3 py-1 rounded-full border ${active?'border-brand-500 bg-brand-500/10 text-brand-200':'border-slate-600 bg-slate-900 text-slate-300'} hover:border-brand-500 hover:text-brand-200`
+        btn.textContent=n
+        btn.onclick=()=>{ state.selectedExercise = n; populateExercisePicker(); drawAll() }
+        cont.appendChild(btn)
+      })
+    }
+
+    // ======== METRICS: PROGRESSION PAR EXERCICE ========
+    function bestWeightByDay(exName, repMin){
+      const arr = filterByPeriod(state.rows).filter(r=> isWorkingSet(r) && r.exercise===exName && Number(r.reps)>=repMin && Number(r.weight)>0)
+      const map=new Map() // date-> best weight
+      for(const r of arr){ const key=r.date.format('YYYY-MM-DD'); const cur=map.get(key)||0; if(r.weight>cur) map.set(key, r.weight) }
+      return Array.from(map.entries()).map(([date,weight])=>({date, value:weight})).sort((a,b)=>a.date.localeCompare(b.date))
+    }
+    function bestVolumeByDay(exName){
+      const arr = filterByPeriod(state.rows).filter(r=> isWorkingSet(r) && r.exercise===exName && Number(r.weight)>0 && Number(r.reps)>=1)
+      const map=new Map() // date-> best volume
+      for(const r of arr){ const key=r.date.format('YYYY-MM-DD'); const vol=r.weight*r.reps; const cur=map.get(key)||0; if(vol>cur) map.set(key, vol) }
+      return Array.from(map.entries()).map(([date,value])=>({date,value})).sort((a,b)=>a.date.localeCompare(b.date))
+    }
+
+    // ======== CHARTS ========
+    const COLORS = {
+      'Pectoraux': '#22c55e','Épaules (ant/lat)': '#fb923c','Deltoïdes arrière': '#60a5fa','Dos': '#22d3ee','Jambes (quads)': '#eab308','Jambes (ischios/glutes)': '#a78bfa','Biceps': '#f472b6','Triceps': '#f59e0b','Mollets': '#94a3b8','Tronc (core)': '#64748b','Autre/Indéfini': '#475569'
+    }
+
+    function drawProgress(){
+      const div=document.getElementById('chart_progress')
+      if(!state.selectedExercise){
+        div.innerHTML = '<div class="text-slate-500 text-sm">Choisis un exercice ci-dessus.</div>'
+        return
+      }
+      let data=[]
+      if(state.metric==='best_weight') data = bestWeightByDay(state.selectedExercise, state.repThreshold)
+      else data = bestVolumeByDay(state.selectedExercise)
+      if(!data.length){
+        div.innerHTML = '<div class="text-slate-500 text-sm">Aucune donnée pour cet exercice dans la période.</div>'
+        return
+      }
+      const x = data.map(d=>d.date)
+      const y = data.map(d=> Math.round(d.value*10)/10 )
+      const pr = Math.max(...y)
+      const idx = y.indexOf(pr)
+      const series = [
+        { x, y, name: state.selectedExercise, type:'scatter', mode:'lines+markers', line:{width:2}, marker:{size:6} },
+        { x:[x[idx]], y:[pr], name:'PR', type:'scatter', mode:'markers', marker:{size:10,color:'#ef4444',symbol:'star'}, showlegend:false }
+      ]
+      const yTitle = state.metric==='best_weight' ? `Meilleure charge (kg) ≥ ${state.repThreshold} reps` : 'Meilleure série (kg×reps)'
+      const layout={ margin:{l:50,r:16,t:10,b:50}, paper_bgcolor:'transparent', plot_bgcolor:'transparent', xaxis:{tickangle:-20, gridcolor:'#1f2937'}, yaxis:{gridcolor:'#1f2937', title:yTitle}, legend:{orientation:'h', y:-0.2} }
+      Plotly.newPlot(div, series, layout, {displayModeBar:false, responsive:true})
+    }
+
+    function ensureGroupSeries(groupName){
+      const weeks = state.groups.weeksSorted; const arr=(state.groups.groups[groupName]||[]); const map=new Map(arr.map(o=>[o.week,o])); const y=weeks.map(wk=> (map.get(wk)?.sets)||0 ); const yW=weeks.map(wk=> (map.get(wk)?.setsW)||0 ); return {weeks,y,yW}
+    }
+
+    function drawSets(){
+      const groups=Object.keys(state.groups.groups); const weeks=state.groups.weeksSorted; const traces=[]
+      for(const g of groups){ const data=ensureGroupSeries(g); traces.push({ x:data.weeks, y:data.y, type:'bar', name:g, marker:{color:COLORS[g]||'#64748b'} }) }
+      const layout={ barmode:'stack', margin:{l:40,r:16,t:10,b:60}, paper_bgcolor:'transparent', plot_bgcolor:'transparent', xaxis:{tickangle:-30, gridcolor:'#1f2937', automargin:true}, yaxis:{gridcolor:'#1f2937', title:'Sets/semaine'} }
+      Plotly.newPlot('chart_sets', traces, layout, {displayModeBar:false, responsive:true})
+    }
+
+    function drawSessions(){
+      const weeks=state.groups.weeksSorted; const counts=weeks.map(wk=> state.groups.sessions.get(wk)||0 )
+      const layout={ margin:{l:40,r:16,t:10,b:60}, paper_bgcolor:'transparent', plot_bgcolor:'transparent', xaxis:{tickangle:-30, gridcolor:'#1f2937'}, yaxis:{gridcolor:'#1f2937', title:'Séances/semaine'} }
+      Plotly.newPlot('chart_sessions', [{x:weeks, y:counts, type:'bar', marker:{color:'#334155'}}], layout, {displayModeBar:false, responsive:true})
+    }
+
+    // ======== KPI & SUMMARY ========
+    function setKPI(id,v){ document.getElementById(id).textContent=v }
+    function tag(text,color='bg-slate-800'){ return `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] ${color} border border-slate-700">${text}</span>` }
+
+    function computeKPIs(){
+      // Sets pecs last week
+      const pecSeries = ensureGroupSeries('Pectoraux'); const lastSets = pecSeries.y.length? pecSeries.y[pecSeries.y.length-1] : 0; setKPI('kpiPecsSets', lastSets||'—')
+
+      // PR récent sur l'exercice sélectionné
+      if(state.selectedExercise){
+        let data=[]
+        if(state.metric==='best_weight') data = bestWeightByDay(state.selectedExercise, state.repThreshold)
+        else data = bestVolumeByDay(state.selectedExercise)
+        const last30 = data.filter(p=> dayjs(p.date).isAfter(dayjs().subtract(30,'day'),'day'))
+        if(last30.length){ const pr=Math.max(...last30.map(p=>p.value)); setKPI('kpiMainPR', (state.metric==='best_weight'? Math.round(pr)+' kg' : Math.round(pr)+' kg×reps')) } else setKPI('kpiMainPR','—')
+      } else setKPI('kpiMainPR','—')
+
+      // Alerte stagnation (exercice sélectionné)
+      let alertHtml = '<span class="text-slate-500">Aucune alerte.</span>'
+      if(state.selectedExercise){
+        let data=[]
+        if(state.metric==='best_weight') data=bestWeightByDay(state.selectedExercise,state.repThreshold); else data=bestVolumeByDay(state.selectedExercise)
+        if(data.length>=8){
+          const byWeek={}
+          for(const p of data.slice(-20)){ const wk=weekKey(dayjs(p.date)); byWeek[wk]=Math.max(byWeek[wk]||0, p.value) }
+          const weeks=Object.keys(byWeek).sort(); if(weeks.length>=6){
+            const recent=weeks.slice(-3).map(w=>byWeek[w]); const prev=weeks.slice(-6,-3).map(w=>byWeek[w]);
+            const maxR=Math.max(...recent), maxP=Math.max(...prev)
+            if(!(maxR > maxP*1.01)){
+              alertHtml = `Stagnation possible sur <b>${state.selectedExercise}</b> (métrique: ${state.metric==='best_weight'? 'meilleure charge ≥ '+state.repThreshold+' reps':'meilleure série volume'})`
+            }
+          }
+        }
+      }
+      document.getElementById('kpiAlerts').innerHTML = alertHtml
+
+      // Summary
+      const totalWeeks = state.groups.weeksSorted.length; const sessionsTotal = state.groups.weeksSorted.reduce((acc,wk)=> acc + (state.groups.sessions.get(wk)||0), 0)
+      document.getElementById('summaryText').innerHTML = `${tag(totalWeeks+" sem")} ${tag(sessionsTotal+" séances")} ${tag('Pecs sets dernière sem: '+(lastSets||0))} ${tag('Seuil reps: '+state.repThreshold)}`
+    }
+
+    function drawAll(){ aggregate(); drawProgress(); drawSets(); drawSessions(); computeKPIs() }
+
+    // ======== FILE HANDLING ========
+    document.getElementById('fileInput').addEventListener('change', (ev)=>{
+      const file = ev.target.files?.[0]; if(!file) return
+      document.getElementById('fileInfo').textContent = `${file.name} — ${(file.size/1024).toFixed(1)} Ko`
+      Papa.parse(file, { header:true, skipEmptyLines:true, encoding:'utf-8', complete:(res)=>{
+        if(!res.data || res.data.length===0){ const a=document.getElementById('parseAlert'); a.classList.remove('hidden'); a.innerText='Aucune donnée trouvée.'; return }
+        const headers = res.meta?.fields || Object.keys(res.data[0]); state.cols = detectColumns(headers)
+        const missing=[]; if(!state.cols.date) missing.push('date'); if(!state.cols.exercise) missing.push('exercise'); if(!state.cols.reps) missing.push('reps'); if(!state.cols.weight) missing.push('weight')
+        if(missing.length){ const a=document.getElementById('parseAlert'); a.classList.remove('hidden'); a.innerHTML='Colonnes manquantes: '+missing.join(', '); } else { document.getElementById('parseAlert').classList.add('hidden') }
+        processRows(res.data)
+        if(state.rows.length){ const dates=state.rows.map(r=>r.date).sort((a,b)=>a.valueOf()-b.valueOf()); const end=dates[dates.length-1]; const start=end.subtract(84,'day'); state.period.start=start; state.period.end=end; document.getElementById('startDate').value=start.format('YYYY-MM-DD'); document.getElementById('endDate').value=end.format('YYYY-MM-DD') }
+        populateGroupSelect(); populateExercisePicker(); drawAll()
+      }, error:(err)=>{ const a=document.getElementById('parseAlert'); a.classList.remove('hidden'); a.innerText='Erreur CSV: '+(err?.message||err) } })
+    })
+
+    // ======== FILTERS & CONTROLS ========
+    document.getElementById('startDate').addEventListener('change', (e)=>{ const v=e.target.value; state.period.start = v? dayjs(v):null; drawAll() })
+    document.getElementById('endDate').addEventListener('change', (e)=>{ const v=e.target.value; state.period.end = v? dayjs(v):null; drawAll() })
+    document.querySelectorAll('.rangeBtn').forEach(btn=> btn.addEventListener('click', ()=>{ if(!state.rows.length) return; const end=state.rows.map(r=>r.date).sort((a,b)=>a.valueOf()-b.valueOf()).slice(-1)[0]; const days=Number(btn.dataset.range); const start=end.subtract(days,'day'); state.period.start=start; state.period.end=end; document.getElementById('startDate').value=start.format('YYYY-MM-DD'); document.getElementById('endDate').value=end.format('YYYY-MM-DD'); drawAll() }))
+    document.getElementById('useRPE').addEventListener('change', (e)=>{ state.useRPE = e.target.checked; drawAll() })
+    document.getElementById('repThreshold').addEventListener('change', (e)=>{ const v=Number(e.target.value||5); state.repThreshold=Math.max(1,Math.min(20,v)); drawAll() })
+    document.getElementById('metricSelect').addEventListener('change', (e)=>{ state.metric=e.target.value; drawAll() })
+    document.getElementById('btnReset').addEventListener('click', ()=>{
+      state.rows=[]; state.groups={}; state.exercises=new Set(); state.exerciseGroupMap=new Map(); state.selectedExercise=null; state.selectedGroup='Tous'; state.period={start:null,end:null};
+      document.getElementById('fileInput').value=''; document.getElementById('fileInfo').textContent=''; document.getElementById('exerciseList').innerHTML=''; document.getElementById('groupSelect').innerHTML='';
+      ;['chart_progress','chart_sets','chart_sessions'].forEach(id=>{ document.getElementById(id).innerHTML='<div class="text-slate-500 text-sm">Importe un fichier CSV pour commencer.</div>' })
+      document.getElementById('kpiPecsSets').textContent='—'; document.getElementById('kpiMainPR').textContent='—'; document.getElementById('kpiAlerts').innerHTML=''; document.getElementById('summaryText').innerHTML=''
+    })
+
+    // Placeholders init
+    window.addEventListener('load', ()=>{ ['chart_progress','chart_sets','chart_sessions'].forEach(id=>{ document.getElementById(id).innerHTML='<div class="text-slate-500 text-sm">Importe un fichier CSV pour commencer.</div>' }) })
+  </script>
+</body>
+</html>
